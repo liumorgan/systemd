@@ -297,25 +297,27 @@ static inline sd_network_monitor* FD_TO_MONITOR(int fd) {
         return (sd_network_monitor*) (unsigned long) (fd + 1);
 }
 
-static int monitor_add_inotify_watch(int fd) {
+static int monitor_add_inotify_watch(int fd, int *wd) {
         int k;
 
         k = inotify_add_watch(fd, "/run/systemd/netif/links/", IN_MOVED_TO|IN_DELETE);
         if (k >= 0)
-                return 0;
+                goto done;
         else if (errno != ENOENT)
                 return -errno;
 
         k = inotify_add_watch(fd, "/run/systemd/netif/", IN_CREATE|IN_ISDIR);
         if (k >= 0)
-                return 0;
+                goto done;
         else if (errno != ENOENT)
                 return -errno;
 
         k = inotify_add_watch(fd, "/run/systemd/", IN_CREATE|IN_ISDIR);
         if (k < 0)
                 return -errno;
-
+done:
+        if (wd)
+              *wd = k;
         return 0;
 }
 
@@ -331,7 +333,7 @@ _public_ int sd_network_monitor_new(sd_network_monitor **m, const char *category
                 return -errno;
 
         if (!category || streq(category, "links")) {
-                k = monitor_add_inotify_watch(fd);
+                k = monitor_add_inotify_watch(fd, NULL);
                 if (k < 0)
                         return k;
 
@@ -378,13 +380,18 @@ _public_ int sd_network_monitor_flush(sd_network_monitor *m) {
 
         FOREACH_INOTIFY_EVENT(e, buffer, l) {
                 if (e->mask & IN_ISDIR) {
-                        k = monitor_add_inotify_watch(fd);
+                        int wd = -1;
+
+                        k = monitor_add_inotify_watch(fd, &wd);
                         if (k < 0)
                                 return k;
 
-                        k = inotify_rm_watch(fd, e->wd);
-                        if (k < 0)
-                                return -errno;
+                        if (e->wd != wd) {
+                                k = inotify_rm_watch(fd, e->wd);
+                                if (k < 0)
+                                        return -errno;
+
+                        }
                 }
         }
 
