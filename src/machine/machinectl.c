@@ -2312,7 +2312,12 @@ static int set_limit(int argc, char *argv[], void *userdata) {
         int r;
 
         if (STR_IN_SET(argv[argc-1], "-", "none", "infinity"))
-                limit = (uint64_t) -1;
+                /*
+                 * Linux kernel uses *signed* 64bit numbers for offsets and
+                 * sizes, for example ftruncate() returns EINVAL for length < 0.
+                 * This (8EiB) is VFS limitation for many operations.
+                 */
+                limit = INT64_MAX;
         else {
                 r = parse_size(argv[argc-1], 1024, &limit);
                 if (r < 0)
